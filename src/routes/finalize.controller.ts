@@ -1,0 +1,70 @@
+import { Body, Controller, Post } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Session } from '../db/session.entity';
+import { Repository } from 'typeorm';
+import { Segment } from '../db/segment.entity';
+import { S3Service } from '../s3/s3.service';
+import { SummarizerService } from '../summary/summarizer.service';
+
+@Controller()
+export class FinalizeController {
+  constructor(
+    @InjectRepository(Session) private sessions: Repository<Session>,
+    @InjectRepository(Segment) private segments: Repository<Segment>,
+    private s3: S3Service,
+    private summarizer: SummarizerService,
+  ) {
+    console.log('🏁 FinalizeController initialized');
+  }
+
+  @Post('finalize')
+  async finalize(
+    @Body('sessionId') sessionId: string,
+    @Body('therapistId') therapistIdStr?: string,
+    @Body('patientId') patientIdStr?: string,
+    @Body('organizationId') organizationIdStr?: string,
+    @Body('appointmentId') appointmentIdStr?: string,
+  ) {
+    // set metadata if provided late
+    const patch: Partial<Session> = {
+      endRequested: true,
+      status: 'FINALIZING',
+    };
+    if (therapistIdStr) patch.therapistId = Number(therapistIdStr);
+    if (patientIdStr) patch.patientId = Number(patientIdStr);
+    if (organizationIdStr) patch.organizationId = Number(organizationIdStr);
+    if (appointmentIdStr) patch.appointmentId = Number(appointmentIdStr);
+    await this.sessions.update({ sessionId }, patch);
+
+    // flush leftover rolling text as a final segment
+    const s = await this.sessions.findOneBy({ sessionId });
+    if (s && s.rollingText.trim()) {
+      const idx = s.nextSegmentIndex;
+      const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
+      await this.s3.putObject(
+        segInputKey,
+        Buffer.from(s.rollingText.trim()),
+        'text/plain',
+      );
+      await this.segments.insert({
+        sessionId,
+        segmentIndex: idx,
+        status: 'PENDING',
+      });
+      await this.summarizer.invokeChunkSummarizer(sessionId, idx, segInputKey);
+      await this.sessions.update(
+        { sessionId },
+        { nextSegmentIndex: idx + 1, rollingText: '', rollingTokenCount: 0 },
+      );
+    }
+
+    // combine summaries
+    const all = await this.segments.find({ where: { sessionId } });
+    const keys: string[] = all
+      .filter((x) => x.summaryS3Key)
+      .map((x) => x.summaryS3Key!);
+    const finalKey = await this.summarizer.combineSegments(sessionId, keys);
+    await this.sessions.update({ sessionId }, { status: 'COMPLETE' });
+    return { ok: true, finalKey };
+  }
+}
