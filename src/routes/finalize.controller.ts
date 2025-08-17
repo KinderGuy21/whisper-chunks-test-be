@@ -36,6 +36,7 @@ export class FinalizeController {
 
     // flush leftover rolling text as a final segment
     const s = await this.redis.getSession(sessionId);
+    console.log('FINALIZED SESSION', s);
     if (s && s.rollingText.trim()) {
       const idx = s.nextSegmentIndex;
       const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
@@ -59,6 +60,7 @@ export class FinalizeController {
 
     // combine summaries
     const all = await this.redis.getSegmentsBySession(sessionId);
+    console.log('--------------REDIS SESSION SEGMENTS--------------', all);
     const keys: string[] = all
       .filter((x) => x.summaryS3Key)
       .map((x) => x.summaryS3Key!);

@@ -67,7 +67,7 @@ export class SummarizerService {
       // chunks contract: one chunk per segment in this POC
       chunks: [{ index: segmentIndex, start: 0, end: 0, text }],
     };
-
+    console.log('SUMMARY_LAMBDA_INVOKED:', payload);
     const out = await this.lambda.send(
       new InvokeCommand({
         FunctionName: this.arn,
