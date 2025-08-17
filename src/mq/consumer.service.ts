@@ -1,7 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { RabbitService } from './rabbit.service';
 import { S3Service } from '../s3/s3.service';
-import fetch from 'node-fetch';
 import { ConfigService } from '@nestjs/config';
 import { Chunk } from '../db/chunk.entity';
 import { RedisService } from '../db/redis.service';

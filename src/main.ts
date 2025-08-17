@@ -16,14 +16,14 @@ async function bootstrap() {
 
     const port = process.env.PORT ?? 3000;
     console.log(`🌐 Starting HTTP server on port ${port}...`);
-    await app.listen(port);
-
     app.enableCors({
       origin: 'http://localhost:5173', // your React dev server
       credentials: true,
       allowedHeaders: '*',
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     });
+
+    await app.listen(port);
 
     const bootTime = Date.now() - startTime;
     console.log(`🎉 Application started successfully in ${bootTime}ms`);

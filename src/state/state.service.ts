@@ -189,8 +189,18 @@ export class StateService {
     const threshold = this.tokenThreshold;
     const shouldSummarize =
       combinedText.trim().length > 0 && newTokenCount >= threshold;
-
+    console.log('📝 Should summarize?', shouldSummarize);
+    console.log(
+      'Why? Token count:',
+      newTokenCount,
+      'Threshold:',
+      threshold,
+      'COMBINED TEXT:',
+      combinedText,
+    );
+    console.log('previous REDIS session:', session);
     if (!shouldSummarize) {
+      console.log('📝 Not summarizing..., not enough text');
       await this.redis.updateSession(sessionId, {
         rollingText: combinedText,
         rollingTokenCount: newTokenCount,
@@ -198,7 +208,7 @@ export class StateService {
       });
       return;
     }
-
+    console.log('📝 Summarizing!...');
     // We will close the rolling buffer into a segment
     const idx = session.nextSegmentIndex;
     const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
