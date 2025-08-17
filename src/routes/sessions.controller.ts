@@ -1,22 +1,17 @@
 import { Controller, Get, Param } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Session } from '../db/session.entity';
 import { Chunk } from '../db/chunk.entity';
 import { Segment } from '../db/segment.entity';
+import { RedisService } from '../db/redis.service';
 
 @Controller('sessions')
 export class SessionsController {
-  constructor(
-    @InjectRepository(Session) private sessions: Repository<Session>,
-    @InjectRepository(Chunk) private chunks: Repository<Chunk>,
-    @InjectRepository(Segment) private segments: Repository<Segment>,
-  ) {}
+  constructor(private redis: RedisService) {}
 
   @Get(':id/progress')
   async progress(@Param('id') id: string) {
-    const s = await this.sessions.findOneBy({ sessionId: id });
-    const all = await this.chunks.find({ where: { sessionId: id } });
+    const s = await this.redis.getSession(id);
+    const all = await this.redis.getChunksBySession(id);
     const done = all.filter((c) => c.status === 'SUCCEEDED').length;
     const failed = all.filter((c) =>
       ['FAILED', 'CANCELLED', 'TIMED_OUT'].includes(c.status),
@@ -27,17 +22,11 @@ export class SessionsController {
 
   @Get(':id/chunks')
   async listChunks(@Param('id') id: string) {
-    return this.chunks.find({
-      where: { sessionId: id },
-      order: { seq: 'ASC' },
-    });
+    return this.redis.getChunksBySession(id);
   }
 
   @Get(':id/segments')
   async listSegments(@Param('id') id: string) {
-    return this.segments.find({
-      where: { sessionId: id },
-      order: { segmentIndex: 'ASC' },
-    });
+    return this.redis.getSegmentsBySession(id);
   }
 }

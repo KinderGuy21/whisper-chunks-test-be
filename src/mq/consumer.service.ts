@@ -3,9 +3,8 @@ import { RabbitService } from './rabbit.service';
 import { S3Service } from '../s3/s3.service';
 import fetch from 'node-fetch';
 import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Chunk } from '../db/chunk.entity';
+import { RedisService } from '../db/redis.service';
 
 @Injectable()
 export class ConsumerService implements OnModuleInit {
@@ -19,7 +18,7 @@ export class ConsumerService implements OnModuleInit {
     private rabbit: RabbitService,
     private s3: S3Service,
     cfg: ConfigService,
-    @InjectRepository(Chunk) private chunks: Repository<Chunk>,
+    private redis: RedisService,
   ) {
     console.log('👂 Initializing ConsumerService...');
     this.endpoint = cfg.get<string>('RUNPOD_ENDPOINT')!;
@@ -128,10 +127,10 @@ export class ConsumerService implements OnModuleInit {
 
       // set QUEUED_REMOTE
       console.log('💾 Updating chunk status to QUEUED_REMOTE...');
-      await this.chunks.update(
-        { sessionId, seq },
-        { status: 'QUEUED_REMOTE', runpodJobId: jobId || null },
-      );
+      await this.redis.updateChunk(sessionId, seq, {
+        status: 'QUEUED_REMOTE',
+        runpodJobId: jobId || null,
+      });
       console.log('✅ Chunk status updated successfully');
 
       const totalTime = Date.now() - startTime;

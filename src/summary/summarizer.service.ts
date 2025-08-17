@@ -2,11 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { ConfigService } from '@nestjs/config';
 import { S3Service } from '../s3/s3.service';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Segment } from '../db/segment.entity';
 import { Session } from '../db/session.entity';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { RedisService } from '../db/redis.service';
 
 async function streamToString(stream: any): Promise<string> {
   return await new Promise((resolve, reject) => {
@@ -26,8 +25,7 @@ export class SummarizerService {
   constructor(
     cfg: ConfigService,
     private s3: S3Service,
-    @InjectRepository(Segment) private segments: Repository<Segment>,
-    @InjectRepository(Session) private sessions: Repository<Session>,
+    private redis: RedisService,
   ) {
     const region = cfg.get('AWS_REGION');
     this.lambda = new LambdaClient({ region });
@@ -40,10 +38,9 @@ export class SummarizerService {
     segmentIndex: number,
     segInputKey: string,
   ) {
-    await this.segments.update(
-      { sessionId, segmentIndex },
-      { status: 'SUMMARIZING' },
-    );
+    await this.redis.updateSegment(sessionId, segmentIndex, {
+      status: 'SUMMARIZING',
+    });
 
     // load segment raw text from S3
     const obj = await this.s3raw.send(
@@ -52,7 +49,7 @@ export class SummarizerService {
     const text = await streamToString(obj.Body as any);
 
     // pull ids from session
-    const s = await this.sessions.findOneBy({ sessionId });
+    const s = await this.redis.getSession(sessionId);
 
     const payload = {
       // your lambda needs these
@@ -85,10 +82,10 @@ export class SummarizerService {
       'application/json',
     );
 
-    await this.segments.update(
-      { sessionId, segmentIndex },
-      { status: 'SUCCEEDED', summaryS3Key: summaryKey },
-    );
+    await this.redis.updateSegment(sessionId, segmentIndex, {
+      status: 'SUCCEEDED',
+      summaryS3Key: summaryKey,
+    });
   }
 
   async combineSegments(sessionId: string, summaryKeys: string[]) {

@@ -1,12 +1,3 @@
-import {
-  Column,
-  Entity,
-  PrimaryColumn,
-  PrimaryGeneratedColumn,
-  CreateDateColumn,
-  UpdateDateColumn,
-} from 'typeorm';
-
 export type ChunkStatus =
   | 'UPLOADED'
   | 'ENQUEUED'
@@ -18,47 +9,19 @@ export type ChunkStatus =
   | 'TIMED_OUT'
   | 'RETRYING';
 
-@Entity('chunks')
-export class Chunk {
-  @PrimaryColumn('text')
-  sessionId!: string;
-
-  @PrimaryColumn('int')
-  seq!: number;
-
-  @Column('text')
-  s3Key!: string;
-
-  @Column('bigint')
-  startMs!: number;
-
-  @Column('bigint')
-  endMs!: number;
-
-  @Column('text', { default: 'UPLOADED' })
-  status!: ChunkStatus;
-
-  @Column('text', { nullable: true })
-  runpodJobId!: string | null;
-
-  @Column('int', { default: 0 })
-  attempt!: number;
-
-  @Column('text', { nullable: true })
-  errorCode!: string | null;
-
-  @Column('text', { nullable: true })
-  errorMessage!: string | null;
-
-  @Column('text', { nullable: true })
-  transcriptS3Key!: string | null;
-
-  @Column('text', { nullable: true })
-  language!: string | null;
-
-  @CreateDateColumn()
-  createdAt!: Date;
-
-  @UpdateDateColumn()
-  updatedAt!: Date;
+export interface Chunk {
+  sessionId: string;
+  seq: number;
+  s3Key: string;
+  startMs: number;
+  endMs: number;
+  status: ChunkStatus;
+  runpodJobId?: string | null;
+  attempt: number;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  transcriptS3Key?: string | null;
+  language?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }

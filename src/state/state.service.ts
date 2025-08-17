@@ -1,12 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
 import { Session } from '../db/session.entity';
 import { Chunk } from '../db/chunk.entity';
 import { Segment } from '../db/segment.entity';
 import { S3Service } from '../s3/s3.service';
 import { ConfigService } from '@nestjs/config';
 import { SummarizerService } from '../summary/summarizer.service';
+import { RedisService } from '../db/redis.service';
 
 type FWWord = {
   word: string;
@@ -22,9 +21,7 @@ export class StateService {
   private tokenThreshold: number;
 
   constructor(
-    @InjectRepository(Session) private sessions: Repository<Session>,
-    @InjectRepository(Chunk) private chunks: Repository<Chunk>,
-    @InjectRepository(Segment) private segments: Repository<Segment>,
+    private redis: RedisService,
     private s3: S3Service,
     cfg: ConfigService,
     private summarizer: SummarizerService,
@@ -49,7 +46,7 @@ export class StateService {
     const startTime = Date.now();
 
     try {
-      await this.chunks.update({ sessionId, seq }, { status, ...extra });
+      await this.redis.updateChunk(sessionId, seq, { status, ...extra });
       const duration = Date.now() - startTime;
       console.log(`✅ Chunk status updated successfully in ${duration}ms`);
     } catch (error) {
@@ -123,14 +120,11 @@ export class StateService {
 
       // mark chunk
       console.log('💾 Updating chunk status to SUCCEEDED...');
-      await this.chunks.update(
-        { sessionId, seq },
-        {
-          status: 'SUCCEEDED',
-          transcriptS3Key: transcriptKey,
-          language: output.language || null,
-        },
-      );
+      await this.redis.updateChunk(sessionId, seq, {
+        status: 'SUCCEEDED',
+        transcriptS3Key: transcriptKey,
+        language: output.language || null,
+      });
       console.log('✅ Chunk status updated to SUCCEEDED');
 
       // merge and maybe summarize
@@ -155,120 +149,82 @@ export class StateService {
     const tokensAll = this.estimateTokens(textAll);
     const maxEndInChunk = Math.max(0, ...kept.map((w) => w.end || 0));
 
-    // 2) Do the state mutation in a short transaction with a row lock
-    type TxResult =
-      | { createdSegment: false }
-      | {
-          createdSegment: true;
-          segInputKey: string;
-          segmentIndex: number;
-          combinedText: string;
-        };
+    // 2) Get or create session
+    let session = await this.redis.getSession(sessionId);
+    if (!session) {
+      await this.redis.createSession({
+        sessionId,
+        status: 'TRANSCRIBING',
+        therapistId: null,
+        patientId: null,
+        organizationId: null,
+        appointmentId: null,
+        lastKeptEndSeconds: 0,
+        rollingTokenCount: 0,
+        nextSegmentIndex: 0,
+        endRequested: false,
+        rollingText: '',
+      });
+      session = await this.redis.getSession(sessionId);
+    }
 
-    const txResult = await this.sessions.manager.transaction(
-      'READ COMMITTED',
-      async (em): Promise<TxResult> => {
-        const sRepo = em.getRepository(Session);
-        const segRepo = em.getRepository(Segment);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
 
-        // Make sure session exists (idempotent)
-        await sRepo
-          .createQueryBuilder()
-          .insert()
-          .into(Session)
-          .values({ sessionId, status: 'TRANSCRIBING' })
-          .orIgnore()
-          .execute();
+    // Apply watermark (dedupe) now that we have lastKeptEndSeconds
+    const keptAfterWatermark: FWWord[] = [];
+    for (const w of kept) {
+      const end = w.end ?? 0;
+      if (end > session.lastKeptEndSeconds - epsilon)
+        keptAfterWatermark.push(w);
+    }
+    const text = this.cleanJoin(keptAfterWatermark);
+    const tokens = this.estimateTokens(text);
+    const newEnd = Math.max(session.lastKeptEndSeconds, maxEndInChunk);
+    const combinedText = (session.rollingText || '') + (text ? ' ' + text : '');
+    const newTokenCount = session.rollingTokenCount + tokens;
 
-        // Lock the session row for update
-        const session = await sRepo
-          .createQueryBuilder('s')
-          .setLock('pessimistic_write')
-          .where('s.sessionId = :sessionId', { sessionId })
-          .getOne();
+    // Decide whether to cut a segment
+    const threshold = this.tokenThreshold;
+    const shouldSummarize =
+      combinedText.trim().length > 0 && newTokenCount >= threshold;
 
-        if (!session) {
-          // Extremely unlikely due to insert-or-ignore above, but guard anyway
-          throw new Error(`Session ${sessionId} not found`);
-        }
+    if (!shouldSummarize) {
+      await this.redis.updateSession(sessionId, {
+        rollingText: combinedText,
+        rollingTokenCount: newTokenCount,
+        lastKeptEndSeconds: newEnd,
+      });
+      return;
+    }
 
-        // Apply watermark (dedupe) now that we have lastKeptEndSeconds
-        const keptAfterWatermark: FWWord[] = [];
-        for (const w of kept) {
-          const end = w.end ?? 0;
-          if (end > session.lastKeptEndSeconds - epsilon)
-            keptAfterWatermark.push(w);
-        }
-        const text = this.cleanJoin(keptAfterWatermark);
-        const tokens = this.estimateTokens(text);
-        const newEnd = Math.max(session.lastKeptEndSeconds, maxEndInChunk);
-        const combinedText =
-          (session.rollingText || '') + (text ? ' ' + text : '');
-        const newTokenCount = session.rollingTokenCount + tokens;
+    // We will close the rolling buffer into a segment
+    const idx = session.nextSegmentIndex;
+    const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
 
-        // Decide whether to cut a segment
-        const threshold = this.tokenThreshold;
-        const shouldSummarize =
-          combinedText.trim().length > 0 && newTokenCount >= threshold;
+    // Insert a new segment row (PENDING); summary key will be filled later by the summarizer
+    await this.redis.createSegment({
+      sessionId,
+      segmentIndex: idx,
+      status: 'PENDING',
+      tokenCount: newTokenCount,
+    });
 
-        if (!shouldSummarize) {
-          await sRepo.update(
-            { sessionId },
-            {
-              rollingText: combinedText,
-              rollingTokenCount: newTokenCount,
-              lastKeptEndSeconds: newEnd,
-            },
-          );
-          return { createdSegment: false };
-        }
-
-        // We will close the rolling buffer into a segment
-        const idx = session.nextSegmentIndex;
-        const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
-
-        // Insert a new segment row (PENDING); summary key will be filled later by the summarizer
-        await segRepo.insert({
-          sessionId,
-          segmentIndex: idx,
-          status: 'PENDING',
-          tokenCount: newTokenCount,
-        });
-
-        // Reset rolling state and advance segment index
-        await sRepo.update(
-          { sessionId },
-          {
-            nextSegmentIndex: idx + 1,
-            rollingTokenCount: 0,
-            rollingText: '', // we will persist combinedText to S3 and summarize it
-            lastKeptEndSeconds: newEnd,
-          },
-        );
-
-        // Return what we need to do AFTER commit
-        return {
-          createdSegment: true,
-          segInputKey,
-          segmentIndex: idx,
-          combinedText: combinedText.trim(),
-        };
-      },
-    );
+    // Reset rolling state and advance segment index
+    await this.redis.updateSession(sessionId, {
+      nextSegmentIndex: idx + 1,
+      rollingTokenCount: 0,
+      rollingText: '', // we will persist combinedText to S3 and summarize it
+      lastKeptEndSeconds: newEnd,
+    });
 
     // 3) Post-commit I/O (no DB locks held)
-    if (txResult.createdSegment) {
-      const { segInputKey, segmentIndex, combinedText } = txResult;
-      await this.s3.putObject(
-        segInputKey,
-        Buffer.from(combinedText),
-        'text/plain',
-      );
-      await this.summarizer.invokeChunkSummarizer(
-        sessionId,
-        segmentIndex,
-        segInputKey,
-      );
-    }
+    await this.s3.putObject(
+      segInputKey,
+      Buffer.from(combinedText.trim()),
+      'text/plain',
+    );
+    await this.summarizer.invokeChunkSummarizer(sessionId, idx, segInputKey);
   }
 }

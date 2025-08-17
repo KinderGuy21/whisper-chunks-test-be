@@ -9,18 +9,14 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { S3Service } from '../s3/s3.service';
 import { RabbitService } from '../mq/rabbit.service';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Chunk } from '../db/chunk.entity';
-import { Session } from '../db/session.entity';
+import { RedisService } from '../db/redis.service';
 
 @Controller()
 export class UploadController {
   constructor(
     private s3: S3Service,
     private rabbit: RabbitService,
-    @InjectRepository(Chunk) private chunks: Repository<Chunk>,
-    @InjectRepository(Session) private sessions: Repository<Session>,
+    private redis: RedisService,
   ) {
     console.log('📤 UploadController initialized');
   }
@@ -66,42 +62,39 @@ export class UploadController {
     const appointmentId = appointmentIdStr ? Number(appointmentIdStr) : null;
 
     // upsert session and persist metadata if provided
-    await this.sessions
-      .createQueryBuilder()
-      .insert()
-      .into(Session)
-      .values({
+    const existingSession = await this.redis.getSession(sessionId);
+    if (!existingSession) {
+      await this.redis.createSession({
         sessionId,
         status: 'TRANSCRIBING',
         therapistId,
         patientId,
         organizationId,
         appointmentId,
-      })
-      .orIgnore()
-      .execute();
-
-    if (therapistId || patientId || organizationId || appointmentId) {
-      await this.sessions.update(
-        { sessionId },
-        { therapistId, patientId, organizationId, appointmentId },
-      );
+        lastKeptEndSeconds: 0,
+        rollingTokenCount: 0,
+        nextSegmentIndex: 0,
+        endRequested: false,
+        rollingText: '',
+      });
+    } else if (therapistId || patientId || organizationId || appointmentId) {
+      await this.redis.updateSession(sessionId, {
+        therapistId,
+        patientId,
+        organizationId,
+        appointmentId,
+      });
     }
 
-    await this.chunks
-      .createQueryBuilder()
-      .insert()
-      .into(Chunk)
-      .values({
-        sessionId,
-        seq,
-        s3Key: key,
-        startMs,
-        endMs,
-        status: 'UPLOADED',
-      })
-      .orUpdate(['s3Key', 'startMs', 'endMs', 'status'], ['sessionId', 'seq'])
-      .execute();
+    await this.redis.createChunk({
+      sessionId,
+      seq,
+      s3Key: key,
+      startMs,
+      endMs,
+      status: 'UPLOADED',
+      attempt: 0,
+    });
 
     await this.rabbit.publish({
       bucket: this.s3.bucketName(),
@@ -112,7 +105,7 @@ export class UploadController {
       endMs,
     });
 
-    await this.chunks.update({ sessionId, seq }, { status: 'ENQUEUED' });
+    await this.redis.updateChunk(sessionId, seq, { status: 'ENQUEUED' });
     return { ok: true, key };
   }
 }

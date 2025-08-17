@@ -96,3 +96,92 @@ Nest is an MIT-licensed open source project. It can grow thanks to the sponsors 
 ## License
 
 Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+
+# Whisper Chunks Test
+
+A NestJS application for processing audio chunks with Redis as the database.
+
+## Database Migration: PostgreSQL → Redis
+
+This project has been migrated from PostgreSQL to Redis for better performance and simplicity.
+
+### Redis Setup
+
+1. Install Redis:
+   ```bash
+   # macOS
+   brew install redis
+   
+   # Ubuntu/Debian
+   sudo apt-get install redis-server
+   
+   # Using Docker
+   docker run -d -p 6379:6379 redis:alpine
+   ```
+
+2. Start Redis:
+   ```bash
+   # macOS
+   brew services start redis
+   
+   # Ubuntu/Debian
+   sudo systemctl start redis-server
+   
+   # Check status
+   redis-cli ping
+   ```
+
+3. Environment Configuration:
+   Create a `.env` file with:
+   ```env
+   # Redis Configuration
+   REDIS_HOST=localhost
+   REDIS_PORT=6379
+   REDIS_PASSWORD=
+   REDIS_DB=0
+   
+   # S3 Configuration
+   AWS_ACCESS_KEY_ID=your_access_key
+   AWS_SECRET_ACCESS_KEY=your_secret_key
+   AWS_REGION=us-east-1
+   S3_BUCKET=your_bucket_name
+   
+   # RabbitMQ Configuration
+   RABBITMQ_URL=amqp://localhost:5672
+   
+   # Other Configuration
+   ROLLING_THRESHOLD_TOKENS=1200
+   ```
+
+### Installation
+
+```bash
+npm install
+```
+
+### Running the Application
+
+```bash
+# Development
+npm run start:dev
+
+# Production
+npm run start:prod
+```
+
+### Data Structure
+
+The application uses Redis hash sets with the following key patterns:
+
+- **Sessions**: `session:{sessionId}`
+- **Chunks**: `chunk:{sessionId}:{seq}`
+- **Segments**: `segment:{sessionId}:{segmentIndex}`
+
+### API Endpoints
+
+- `POST /upload-chunk` - Upload audio chunks
+- `POST /runpod-callback` - Handle RunPod callbacks
+- `POST /finalize` - Finalize session processing
+- `GET /sessions/:id/progress` - Get session progress
+- `GET /sessions/:id/chunks` - List session chunks
+- `GET /sessions/:id/segments` - List session segments
