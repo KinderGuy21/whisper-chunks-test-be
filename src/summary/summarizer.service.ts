@@ -28,7 +28,13 @@ export class SummarizerService {
     private redis: RedisService,
   ) {
     const region = cfg.get('AWS_REGION');
-    this.lambda = new LambdaClient({ region });
+    this.lambda = new LambdaClient({
+      region,
+      credentials: {
+        accessKeyId: cfg.get('LAMBDA_USER_ACCESS_KEY')!,
+        secretAccessKey: cfg.get('LAMBDA_USER_SECRET_KEY')!,
+      },
+    });
     this.s3raw = new S3Client({ region });
     this.arn = cfg.get<string>('SUMMARY_LAMBDA_ARN')!;
   }
