@@ -3,7 +3,6 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { ConfigService } from '@nestjs/config';
 import { S3Service } from '../s3/s3.service';
 import { Segment } from '../db/segment.entity';
-import { Session } from '../db/session.entity';
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { RedisService } from '../db/redis.service';
 
@@ -35,7 +34,6 @@ export class SummarizerService {
         secretAccessKey: cfg.get('LAMBDA_USER_SECRET_KEY')!,
       },
     });
-    this.s3raw = new S3Client({ region });
     this.arn = cfg.get<string>('SUMMARY_LAMBDA_ARN')!;
   }
 
@@ -48,23 +46,16 @@ export class SummarizerService {
       status: 'SUMMARIZING',
     });
 
-    // load segment raw text from S3
-    const obj = await this.s3raw.send(
-      new GetObjectCommand({ Bucket: this.s3.bucketName(), Key: segInputKey }),
-    );
-    const text = await streamToString(obj.Body as any);
-
-    // pull ids from session
+    const text = await this.s3.getObjectText(segInputKey);
+    console.log('object text:', text);
     const s = await this.redis.getSession(sessionId);
 
     const payload = {
-      // your lambda needs these
       therapistId: s?.therapistId,
       patientId: s?.patientId,
       organizationId: s?.organizationId,
       appointmentId: s?.appointmentId,
-      userId: s?.therapistId, // map therapist -> userId if your lambda still expects userId
-      // chunks contract: one chunk per segment in this POC
+      userId: s?.therapistId,
       chunks: [{ index: segmentIndex, start: 0, end: 0, text }],
     };
     console.log('SUMMARY_LAMBDA_INVOKED:', payload);
@@ -75,10 +66,12 @@ export class SummarizerService {
       }),
     );
 
-    let j: any = {};
+    let j: unknown = {};
     try {
       j = JSON.parse(Buffer.from(out.Payload || []).toString('utf8') || '{}');
-    } catch {}
+    } catch (e) {
+      console.log(e);
+    }
 
     // store summary content back to S3
     const summaryKey = `sessions/${sessionId}/segments/segment-${segmentIndex}-summary.json`;

@@ -80,7 +80,7 @@ export class StateService {
     const out: FWWord[] = [];
 
     // Prefer top-level word_timestamps if present
-    const wt = (output as any)?.word_timestamps;
+    const wt = output?.word_timestamps;
     if (Array.isArray(wt) && wt.length) {
       for (const w of wt) {
         const start = Number(w.start ?? 0) + offsetSeconds;
@@ -168,8 +168,7 @@ export class StateService {
 
       // merge and maybe summarize
       console.log('🔄 Merging transcript and checking for summarization...');
-      const offsetSeconds = (Number(startMs) || 0) / 1000;
-      await this.mergeAndMaybeSummarize(sessionId, output, offsetSeconds);
+      await this.mergeAndMaybeSummarize(sessionId, output);
 
       const totalTime = Date.now() - startTime;
       console.log(`🎉 Success handling completed in ${totalTime}ms`);
@@ -180,18 +179,10 @@ export class StateService {
     }
   }
 
-  private async mergeAndMaybeSummarize(
-    sessionId: string,
-    output: FWOutput,
-    offsetSeconds: number,
-  ) {
+  private async mergeAndMaybeSummarize(sessionId: string, output: FWOutput) {
     // 1) Precompute merge outside the transaction
-    const epsilon = 0.15;
     const words = this.flattenWords(output);
-    const kept: FWWord[] = words; // keep all for now; watermark applied after we read session's lastKeptEndSeconds
-    const textAll = this.cleanJoin(kept);
-    const tokensAll = this.estimateTokens(textAll);
-    const maxEndInChunk = Math.max(0, ...kept.map((w) => w.end || 0));
+    const text = this.cleanJoin(words);
 
     // 2) Get or create session
     let session = await this.redis.getSession(sessionId);
@@ -203,7 +194,6 @@ export class StateService {
         patientId: null,
         organizationId: null,
         appointmentId: null,
-        lastKeptEndSeconds: 0,
         rollingTokenCount: 0,
         nextSegmentIndex: 0,
         endRequested: false,
@@ -215,17 +205,11 @@ export class StateService {
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
-
-    // Apply watermark (dedupe) now that we have lastKeptEndSeconds
-    const keptAfterWatermark: FWWord[] = [];
-    for (const w of kept) {
-      const end = w.end ?? 0;
-      if (end > session.lastKeptEndSeconds - epsilon)
-        keptAfterWatermark.push(w);
-    }
-    const text = this.cleanJoin(keptAfterWatermark);
+    console.log(
+      '--------------------📝 Merged transcript: -------------------',
+      text,
+    );
     const tokens = this.estimateTokens(text);
-    const newEnd = Math.max(session.lastKeptEndSeconds, maxEndInChunk);
     const combinedText = (session.rollingText || '') + (text ? ' ' + text : '');
     const newTokenCount = session.rollingTokenCount + tokens;
 
@@ -234,21 +218,13 @@ export class StateService {
     const shouldSummarize =
       combinedText.trim().length > 0 && newTokenCount >= threshold;
     console.log('📝 Should summarize?', shouldSummarize);
-    console.log(
-      'Why? Token count:',
-      newTokenCount,
-      'Threshold:',
-      threshold,
-      'COMBINED TEXT:',
-      combinedText,
-    );
+    console.log('TOTAL STORED TEXT:', combinedText);
     console.log('previous REDIS session:', session);
     if (!shouldSummarize) {
       console.log('📝 Not summarizing..., not enough text');
       await this.redis.updateSession(sessionId, {
         rollingText: combinedText,
         rollingTokenCount: newTokenCount,
-        lastKeptEndSeconds: newEnd,
       });
       return;
     }
@@ -269,8 +245,7 @@ export class StateService {
     await this.redis.updateSession(sessionId, {
       nextSegmentIndex: idx + 1,
       rollingTokenCount: 0,
-      rollingText: '', // we will persist combinedText to S3 and summarize it
-      lastKeptEndSeconds: newEnd,
+      rollingText: '',
     });
 
     // 3) Post-commit I/O (no DB locks held)

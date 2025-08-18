@@ -1,6 +1,5 @@
 import { Body, Controller, Post } from '@nestjs/common';
 import { Session } from '../db/session.entity';
-import { Segment } from '../db/segment.entity';
 import { S3Service } from '../s3/s3.service';
 import { SummarizerService } from '../summary/summarizer.service';
 import { RedisService } from '../db/redis.service';

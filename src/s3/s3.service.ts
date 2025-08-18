@@ -3,9 +3,11 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  GetObjectCommandOutput,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { ConfigService } from '@nestjs/config';
+import { Readable } from 'stream';
 
 @Injectable()
 export class S3Service {
@@ -31,7 +33,68 @@ export class S3Service {
 
     console.log('✅ S3Service initialized successfully');
   }
+  async getObject(
+    key: string,
+    opts?: { range?: string; ifMatch?: string; ifNoneMatch?: string },
+  ): Promise<GetObjectCommandOutput> {
+    console.log(`📥 S3 GET Object: ${key}`);
+    console.log(`   - Bucket: ${this.bucket}`);
+    if (opts?.range) console.log(`   - Range: ${opts.range}`);
 
+    const startTime = Date.now();
+    try {
+      const res = await this.s3.send(
+        new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+          Range: opts?.range,
+          IfMatch: opts?.ifMatch,
+          IfNoneMatch: opts?.ifNoneMatch,
+        }),
+      );
+      const duration = Date.now() - startTime;
+      console.log(`✅ S3 GET Object successful: ${key} (${duration}ms)`);
+      return res;
+    } catch (error) {
+      console.error(`❌ S3 GET Object failed: ${key}`, error);
+      throw error;
+    }
+  }
+
+  async getObjectStream(key: string): Promise<Readable> {
+    const res = await this.getObject(key);
+    const body = res.Body as Readable | undefined;
+    if (!body) throw new Error('GetObject returned empty Body');
+    return body;
+  }
+
+  async getObjectBuffer(key: string): Promise<Buffer> {
+    const stream = await this.getObjectStream(key);
+    return await this.streamToBuffer(stream);
+  }
+
+  async getObjectText(
+    key: string,
+    encoding: BufferEncoding = 'utf-8',
+  ): Promise<string> {
+    const buf = await this.getObjectBuffer(key);
+    return buf.toString(encoding);
+  }
+
+  async getObjectJson<T = unknown>(key: string): Promise<T> {
+    const text = await this.getObjectText(key);
+    return JSON.parse(text) as T;
+  }
+
+  private async streamToBuffer(stream: Readable): Promise<Buffer> {
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(
+        typeof chunk === 'string' ? Buffer.from(chunk) : (chunk as Buffer),
+      );
+    }
+    return Buffer.concat(chunks);
+  }
   async putObject(key: string, body: Buffer, contentType?: string) {
     console.log(`📤 S3 PUT Object: ${key}`);
     console.log(`   - Bucket: ${this.bucket}`);

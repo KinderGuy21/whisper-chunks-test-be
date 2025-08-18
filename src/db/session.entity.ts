@@ -15,7 +15,6 @@ export interface Session {
   organizationId?: number | null;
   appointmentId?: number | null;
   // rolling state for dedupe and segmentation
-  lastKeptEndSeconds: number;
   rollingTokenCount: number;
   nextSegmentIndex: number;
   endRequested: boolean;

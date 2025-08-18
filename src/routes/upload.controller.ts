@@ -71,7 +71,6 @@ export class UploadController {
         patientId,
         organizationId,
         appointmentId,
-        lastKeptEndSeconds: 0,
         rollingTokenCount: 0,
         nextSegmentIndex: 0,
         endRequested: false,

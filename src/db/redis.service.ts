@@ -67,7 +67,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       patientId: data.patientId ? Number(data.patientId) : null,
       organizationId: data.organizationId ? Number(data.organizationId) : null,
       appointmentId: data.appointmentId ? Number(data.appointmentId) : null,
-      lastKeptEndSeconds: Number(data.lastKeptEndSeconds) || 0,
       rollingTokenCount: Number(data.rollingTokenCount) || 0,
       nextSegmentIndex: Number(data.nextSegmentIndex) || 0,
       endRequested: data.endRequested === 'true',
