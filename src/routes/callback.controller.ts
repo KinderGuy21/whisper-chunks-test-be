@@ -19,6 +19,7 @@ export class CallbackController {
     @Query('key') _key: string,
     @Body() body: any,
   ) {
+    const startTime = Date.now();
     const seq = Number(seqStr);
     const startMs = Number(startMsStr);
     const status = (body?.status || '').toUpperCase();

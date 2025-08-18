@@ -180,7 +180,11 @@ export class StateService {
     }
   }
 
-  private async mergeAndMaybeSummarize(sessionId: string, output: FWOutput) {
+  private async mergeAndMaybeSummarize(
+    sessionId: string,
+    output: FWOutput,
+    offsetSeconds: number,
+  ) {
     // 1) Precompute merge outside the transaction
     const epsilon = 0.15;
     const words = this.flattenWords(output);
