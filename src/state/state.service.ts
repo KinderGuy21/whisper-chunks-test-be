@@ -11,11 +11,19 @@ type FWWord = {
   word: string;
   start?: number;
   end?: number;
-  probability?: number;
 };
 type FWSegment = { text: string; start: number; end: number; words?: FWWord[] };
-type FWOutput = { segments: FWSegment[]; language?: string };
+type FWOutput = {
+  segments: FWSegment[];
+  language?: string;
+  word_timestamps?: FWWord[];
+};
 
+const STRIP_BIDI = /[\u200E\u200F\u202A-\u202E]/g;
+function cleanupWord(s: string) {
+  // remove bidi/invisible direction chars; keep spacing as-is
+  return (s ?? '').replace(STRIP_BIDI, '');
+}
 @Injectable()
 export class StateService {
   private tokenThreshold: number;
@@ -68,25 +76,51 @@ export class StateService {
     return tokens;
   }
 
-  private flattenWords(output: FWOutput): FWWord[] {
-    console.log(
-      `📝 Flattening words from ${output.segments?.length || 0} segments`,
-    );
+  private flattenWords(output: FWOutput, offsetSeconds = 0): FWWord[] {
     const out: FWWord[] = [];
-    for (const s of output.segments || []) {
-      if (s.words && s.words.length) {
-        console.log(
-          `   - Segment "${s.text.substring(0, 30)}..." has ${s.words.length} words`,
-        );
-        out.push(...s.words);
+
+    // Prefer top-level word_timestamps if present
+    const wt = (output as any)?.word_timestamps;
+    if (Array.isArray(wt) && wt.length) {
+      for (const w of wt) {
+        const start = Number(w.start ?? 0) + offsetSeconds;
+        const end = Number(w.end ?? w.start ?? 0) + offsetSeconds;
+        out.push({
+          word: cleanupWord(String(w.word ?? '')) + ' ', // keep a trailing space to simplify joining
+          start,
+          end,
+        });
+      }
+      // Ensure monotonic order just in case
+      out.sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+      return out;
+    }
+
+    // Fallback: pull words from segments[] if they exist, else make a single "word" per segment
+    const segs = output.segments || [];
+    for (const s of segs) {
+      const startBase = (s?.start ?? 0) + offsetSeconds;
+      const endBase = (s?.end ?? s?.start ?? 0) + offsetSeconds;
+
+      if (Array.isArray(s.words) && s.words.length) {
+        for (const w of s.words) {
+          out.push({
+            word: cleanupWord(String(w.word ?? '')) + ' ',
+            start: (w.start ?? startBase) + offsetSeconds,
+            end: (w.end ?? w.start ?? startBase) + offsetSeconds,
+          });
+        }
       } else {
-        console.log(
-          `   - Segment "${s.text.substring(0, 30)}..." has no word-level timing`,
-        );
-        out.push({ word: s.text + ' ', start: s.start, end: s.end });
+        // No word-level timing: treat the whole segment as a single token
+        out.push({
+          word: cleanupWord(String(s.text ?? '')) + ' ',
+          start: startBase,
+          end: endBase,
+        });
       }
     }
-    console.log(`✅ Flattened ${out.length} total words`);
+
+    out.sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
     return out;
   }
 
@@ -100,7 +134,12 @@ export class StateService {
     return cleaned;
   }
 
-  async handleSuccess(sessionId: string, seq: number, output: FWOutput) {
+  async handleSuccess(
+    sessionId: string,
+    seq: number,
+    output: FWOutput,
+    startMs: number,
+  ) {
     console.log(`🎉 Handling success for session ${sessionId}, seq ${seq}`);
     console.log(`   - Language: ${output.language || 'unknown'}`);
     console.log(`   - Segments: ${output.segments?.length || 0}`);
@@ -129,7 +168,8 @@ export class StateService {
 
       // merge and maybe summarize
       console.log('🔄 Merging transcript and checking for summarization...');
-      await this.mergeAndMaybeSummarize(sessionId, output);
+      const offsetSeconds = (Number(startMs) || 0) / 1000;
+      await this.mergeAndMaybeSummarize(sessionId, output, offsetSeconds);
 
       const totalTime = Date.now() - startTime;
       console.log(`🎉 Success handling completed in ${totalTime}ms`);

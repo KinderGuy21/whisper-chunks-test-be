@@ -13,23 +13,14 @@ export class CallbackController {
   async runpodCallback(
     @Query('sessionId') sessionId: string,
     @Query('seq') seqStr: string,
-    @Query('startMs') _startMs: string,
-    @Query('endMs') _endMs: string,
+    @Query('startMs') startMsStr: string,
+    @Query('endMs') endMsStr: string,
     @Query('bucket') _bucket: string,
     @Query('key') _key: string,
     @Body() body: any,
   ) {
-    console.log('📞 RunPod callback received');
-    console.log(`   - Session ID: ${sessionId}`);
-    console.log(`   - Sequence: ${seqStr}`);
-    console.log(`   - Start Time: ${_startMs}ms`);
-    console.log(`   - End Time: ${_endMs}ms`);
-    console.log(`   - Bucket: ${_bucket}`);
-    console.log(`   - Key: ${_key}`);
-    console.log(`   - Body:`, body);
-
-    const startTime = Date.now();
     const seq = Number(seqStr);
+    const startMs = Number(startMsStr);
     const status = (body?.status || '').toUpperCase();
 
     console.log(`🔍 Processing status: ${status} (original: ${body?.status})`);
@@ -74,7 +65,12 @@ export class CallbackController {
         console.log(`🎉 Handling success for session ${sessionId}, seq ${seq}`);
         console.log(`   - Output:`, body.output || body);
 
-        await this.state.handleSuccess(sessionId, seq, body.output || body);
+        await this.state.handleSuccess(
+          sessionId,
+          seq,
+          body.output || body,
+          startMs,
+        );
         console.log('✅ Success handled successfully');
         return { ok: true };
       }
