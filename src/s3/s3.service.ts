@@ -16,11 +16,6 @@ export class S3Service {
 
   constructor(cfg: ConfigService) {
     console.log('🔧 Initializing S3Service...');
-    console.log(`   - Region: ${cfg.get('AWS_REGION')}`);
-    console.log(`   - Bucket: ${cfg.get('S3_BUCKET')}`);
-    console.log(
-      `   - Access Key: ${cfg.get('S3_ACCESS_KEY') ? '***' + cfg.get('S3_ACCESS_KEY')?.slice(-4) : 'NOT SET'}`,
-    );
 
     this.s3 = new S3Client({
       region: cfg.get('AWS_REGION')!,
@@ -37,10 +32,6 @@ export class S3Service {
     key: string,
     opts?: { range?: string; ifMatch?: string; ifNoneMatch?: string },
   ): Promise<GetObjectCommandOutput> {
-    console.log(`📥 S3 GET Object: ${key}`);
-    console.log(`   - Bucket: ${this.bucket}`);
-    if (opts?.range) console.log(`   - Range: ${opts.range}`);
-
     const startTime = Date.now();
     try {
       const res = await this.s3.send(
@@ -96,13 +87,6 @@ export class S3Service {
     return Buffer.concat(chunks);
   }
   async putObject(key: string, body: Buffer, contentType?: string) {
-    console.log(`📤 S3 PUT Object: ${key}`);
-    console.log(`   - Bucket: ${this.bucket}`);
-    console.log(
-      `   - Content Type: ${contentType || 'application/octet-stream'}`,
-    );
-    console.log(`   - Body Size: ${body.length} bytes`);
-
     const startTime = Date.now();
 
     try {
@@ -124,10 +108,6 @@ export class S3Service {
   }
 
   async presignGet(key: string, expiresIn = 3600) {
-    console.log(`🔗 S3 Presign GET: ${key}`);
-    console.log(`   - Bucket: ${this.bucket}`);
-    console.log(`   - Expires In: ${expiresIn} seconds`);
-
     const startTime = Date.now();
 
     try {
@@ -138,8 +118,6 @@ export class S3Service {
       );
 
       const duration = Date.now() - startTime;
-      console.log(`✅ S3 Presign GET successful: ${key} (${duration}ms)`);
-      console.log(`   - URL: ${url.substring(0, 100)}...`);
 
       return url;
     } catch (error) {

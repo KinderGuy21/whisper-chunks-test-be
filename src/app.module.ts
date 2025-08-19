@@ -35,21 +35,4 @@ import { RedisService } from './db/redis.service';
     SummarizerService,
   ],
 })
-export class AppModule {
-  onModuleInit() {
-    console.log('🏗️  AppModule initialized');
-    console.log('📊 Controllers loaded:', [
-      'UploadController',
-      'CallbackController',
-      'FinalizeController',
-    ]);
-    console.log('🔧 Services loaded:', [
-      'RedisService',
-      'RabbitService',
-      'ConsumerService',
-      'S3Service',
-      'StateService',
-      'SummarizerService',
-    ]);
-  }
-}
+export class AppModule {}

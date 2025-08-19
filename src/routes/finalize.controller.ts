@@ -59,12 +59,26 @@ export class FinalizeController {
 
     // combine summaries
     const all = await this.redis.getSegmentsBySession(sessionId);
-    console.log('--------------REDIS SESSION SEGMENTS--------------', all);
     const keys: string[] = all
       .filter((x) => x.summaryS3Key)
       .map((x) => x.summaryS3Key!);
-    const finalKey = await this.summarizer.combineSegments(sessionId, keys);
+    const consolidatedKey = await this.summarizer.combineSegments(
+      sessionId,
+      keys,
+    );
+
+    // Call the finalizer lambda with the consolidated summary
+    console.log('🚀 Calling finalizer lambda...');
+    const finalizerResult = await this.summarizer.invokeFinalizerLambda(
+      sessionId,
+      consolidatedKey,
+    );
+
     await this.redis.updateSession(sessionId, { status: 'COMPLETE' });
-    return { ok: true, finalKey };
+    return {
+      ok: true,
+      consolidatedKey,
+      finalizerResult,
+    };
   }
 }

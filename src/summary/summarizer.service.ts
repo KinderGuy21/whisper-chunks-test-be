@@ -18,7 +18,8 @@ async function streamToString(stream: any): Promise<string> {
 @Injectable()
 export class SummarizerService {
   private lambda: LambdaClient;
-  private arn: string;
+  private chunkLambdaArn: string;
+  private finalizerLambdaArn: string;
   private s3raw: S3Client;
 
   constructor(
@@ -34,7 +35,59 @@ export class SummarizerService {
         secretAccessKey: cfg.get('LAMBDA_USER_SECRET_KEY')!,
       },
     });
-    this.arn = cfg.get<string>('SUMMARY_LAMBDA_ARN')!;
+    this.chunkLambdaArn = cfg.get<string>('SUMMARY_LAMBDA_ARN')!;
+    this.finalizerLambdaArn = cfg.get<string>('FINALIZER_LAMBDA_ARM')!;
+  }
+
+  async invokeFinalizerSummarizer(
+    sessionId: string,
+    segmentIndex: number,
+    segInputKey: string,
+  ) {
+    await this.redis.updateSegment(sessionId, segmentIndex, {
+      status: 'SUMMARIZING',
+    });
+
+    const text = await this.s3.getObjectText(segInputKey);
+    console.log('object text:', text);
+    const s = await this.redis.getSession(sessionId);
+
+    const payload = {
+      therapistId: s?.therapistId,
+      patientId: s?.patientId,
+      organizationId: s?.organizationId,
+      appointmentId: s?.appointmentId,
+      userId: s?.therapistId,
+      sessionId: s?.sessionId,
+      chunks: [{ index: segmentIndex, start: 0, end: 0, text }],
+    };
+    console.log('SUMMARY_LAMBDA_INVOKED:', payload);
+    const out = await this.lambda.send(
+      new InvokeCommand({
+        FunctionName: this.chunkLambdaArn,
+        Payload: Buffer.from(JSON.stringify(payload)),
+      }),
+    );
+
+    let j: unknown = {};
+    try {
+      j = JSON.parse(Buffer.from(out.Payload || []).toString('utf8') || '{}');
+    } catch (e) {
+      console.log(e);
+    }
+
+    // store summary content back to S3
+    const summaryKey = `sessions/${sessionId}/segments/segment-${segmentIndex}-summary.json`;
+    await this.s3.putObject(
+      summaryKey,
+      Buffer.from(JSON.stringify(j, null, 2)),
+      'application/json',
+    );
+
+    await this.redis.updateSegment(sessionId, segmentIndex, {
+      status: 'SUCCEEDED',
+      summaryS3Key: summaryKey,
+    });
   }
 
   async invokeChunkSummarizer(
@@ -56,12 +109,13 @@ export class SummarizerService {
       organizationId: s?.organizationId,
       appointmentId: s?.appointmentId,
       userId: s?.therapistId,
+      sessionId: s?.sessionId,
       chunks: [{ index: segmentIndex, start: 0, end: 0, text }],
     };
     console.log('SUMMARY_LAMBDA_INVOKED:', payload);
     const out = await this.lambda.send(
       new InvokeCommand({
-        FunctionName: this.arn,
+        FunctionName: this.chunkLambdaArn,
         Payload: Buffer.from(JSON.stringify(payload)),
       }),
     );
@@ -88,19 +142,87 @@ export class SummarizerService {
   }
 
   async combineSegments(sessionId: string, summaryKeys: string[]) {
-    const finalKey = `sessions/${sessionId}/final/summary.json`;
-    const body = JSON.stringify(
-      {
-        sessionId,
-        summaries: summaryKeys.map((k) => ({
-          bucket: this.s3.bucketName(),
-          key: k,
-        })),
-      },
-      null,
-      2,
+    console.log(
+      `🔄 Consolidating ${summaryKeys.length} segment summaries for session ${sessionId}`,
     );
-    await this.s3.putObject(finalKey, Buffer.from(body), 'application/json');
-    return finalKey;
+
+    // Read all segment summaries and combine them
+    const consolidatedSummaries: any[] = [];
+    for (const summaryKey of summaryKeys) {
+      try {
+        const summaryText = await this.s3.getObjectText(summaryKey);
+        const summary = JSON.parse(summaryText);
+        consolidatedSummaries.push({
+          s3Key: summaryKey,
+          content: summary,
+        });
+      } catch (error) {
+        console.error(`❌ Failed to read summary ${summaryKey}:`, error);
+      }
+    }
+
+    // Create consolidated summary file
+    const consolidatedKey = `sessions/${sessionId}/final/consolidated-summary.json`;
+    const consolidatedBody = {
+      sessionId,
+      totalSegments: summaryKeys.length,
+      consolidatedAt: new Date().toISOString(),
+      segments: consolidatedSummaries,
+    };
+
+    await this.s3.putObject(
+      consolidatedKey,
+      Buffer.from(JSON.stringify(consolidatedBody, null, 2)),
+      'application/json',
+    );
+
+    console.log(`✅ Consolidated summary created: ${consolidatedKey}`);
+    return consolidatedKey;
+  }
+
+  async invokeFinalizerLambda(
+    sessionId: string,
+    consolidatedSummaryKey: string,
+  ) {
+    console.log(`🚀 Invoking finalizer lambda for session ${sessionId}`);
+
+    const session = await this.redis.getSession(sessionId);
+    if (!session) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    const payload = {
+      sessionId,
+      therapistId: session.therapistId,
+      patientId: session.patientId,
+      organizationId: session.organizationId,
+      appointmentId: session.appointmentId,
+      userId: session.therapistId,
+      consolidatedSummary: {
+        bucket: this.s3.bucketName(),
+        key: consolidatedSummaryKey,
+      },
+    };
+
+    console.log('📤 Invoking finalizer lambda with payload:', payload);
+
+    const out = await this.lambda.send(
+      new InvokeCommand({
+        FunctionName: this.finalizerLambdaArn,
+        Payload: Buffer.from(JSON.stringify(payload)),
+      }),
+    );
+
+    let result: unknown = {};
+    try {
+      result = JSON.parse(
+        Buffer.from(out.Payload || []).toString('utf8') || '{}',
+      );
+    } catch (e) {
+      console.error('❌ Failed to parse finalizer lambda response:', e);
+    }
+
+    console.log('✅ Finalizer lambda response:', result);
+    return result;
   }
 }

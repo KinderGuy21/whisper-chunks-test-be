@@ -49,7 +49,6 @@ export class StateService {
     console.log(
       `🔄 Setting chunk status: session ${sessionId}, seq ${seq} -> ${status}`,
     );
-    console.log(`   - Extra fields:`, extra);
 
     const startTime = Date.now();
 
@@ -71,7 +70,7 @@ export class StateService {
     // simple heuristic for POC
     const tokens = Math.ceil(text.length / 4);
     console.log(
-      `🔢 Token estimation: "${text.substring(0, 50)}..." -> ${tokens} tokens`,
+      `🔢 Token estimation: "${text.substring(0, 10)}..." -> ${tokens} tokens`,
     );
     return tokens;
   }
@@ -129,7 +128,7 @@ export class StateService {
     const joined = words.map((w) => w.word).join('');
     const cleaned = joined.replace(/\s+/g, ' ').trim();
     console.log(
-      `🧹 Cleaned text: "${joined.substring(0, 100)}..." -> "${cleaned.substring(0, 100)}..."`,
+      `🧹 Cleaned text: "${joined.substring(0, 10)}..." -> "${cleaned.substring(0, 10)}..."`,
     );
     return cleaned;
   }
@@ -141,12 +140,19 @@ export class StateService {
     startMs: number,
   ) {
     console.log(`🎉 Handling success for session ${sessionId}, seq ${seq}`);
-    console.log(`   - Language: ${output.language || 'unknown'}`);
-    console.log(`   - Segments: ${output.segments?.length || 0}`);
 
     const startTime = Date.now();
 
     try {
+      // Idempotency guard: if this chunk already succeeded, skip
+      const existing = await this.redis.getChunk(sessionId, seq);
+      if (existing?.status === 'SUCCEEDED' && existing.transcriptS3Key) {
+        console.log(
+          `🛑 Duplicate success callback for session ${sessionId}, seq ${seq} - ignoring`,
+        );
+        return;
+      }
+
       const transcriptKey = `sessions/${sessionId}/transcripts/chunk-${seq}.json`;
       console.log(`📤 Saving transcript to S3: ${transcriptKey}`);
 
@@ -205,12 +211,11 @@ export class StateService {
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
     }
-    console.log(
-      '--------------------📝 Merged transcript: -------------------',
-      text,
-    );
+
     const tokens = this.estimateTokens(text);
-    const combinedText = (session.rollingText || '') + (text ? ' ' + text : '');
+    const combinedText = session.rollingText
+      ? `${session.rollingText} ${text}`
+      : text;
     const newTokenCount = session.rollingTokenCount + tokens;
 
     // Decide whether to cut a segment

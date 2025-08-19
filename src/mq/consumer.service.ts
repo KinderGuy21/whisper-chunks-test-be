@@ -25,27 +25,16 @@ export class ConsumerService implements OnModuleInit {
     this.callbackBase = cfg.get<string>('CALLBACK_BASE')!;
     this.model = cfg.get<string>('WHISPER_MODEL') || 'medium';
 
-    console.log(`   - RunPod Endpoint: ${this.endpoint}`);
-    console.log(
-      `   - RunPod API Key: ${this.apiKey ? '***' + this.apiKey.slice(-4) : 'NOT SET'}`,
-    );
-    console.log(`   - Callback Base: ${this.callbackBase}`);
-    console.log(`   - Whisper Model: ${this.model}`);
     console.log('✅ ConsumerService initialized');
   }
 
   async onModuleInit() {
-    console.log('🚀 ConsumerService starting up...');
-    console.log('👂 Starting message consumer...');
-
     // start consumer
     await this.rabbit.consume(async (msg) => {
       const payload = JSON.parse(msg.content.toString());
       console.log(`📥 Consumer received message:`, payload);
       await this.handleMessage(payload);
     });
-
-    console.log('✅ ConsumerService startup complete');
   }
 
   private enc(v: string) {
@@ -61,11 +50,6 @@ export class ConsumerService implements OnModuleInit {
     endMs: number;
   }) {
     const { bucket, key, sessionId, seq, startMs, endMs } = payload;
-    console.log(`🔄 Processing message for session ${sessionId}, seq ${seq}`);
-    console.log(`   - Bucket: ${bucket}`);
-    console.log(`   - Key: ${key}`);
-    console.log(`   - Start Time: ${startMs}ms`);
-    console.log(`   - End Time: ${endMs}ms`);
 
     const startTime = Date.now();
 
@@ -73,11 +57,10 @@ export class ConsumerService implements OnModuleInit {
       console.log('🔗 Generating presigned S3 URL...');
       const audioUrl = await this.s3.presignGet(key);
       console.log(
-        `✅ Presigned URL generated: ${audioUrl.substring(0, 100)}...`,
+        `✅ Presigned URL generated: ${audioUrl.substring(0, 20)}...`,
       );
 
       const webhook = `${this.callbackBase}?sessionId=${this.enc(sessionId)}&seq=${seq}&startMs=${startMs}&endMs=${endMs}&bucket=${this.enc(bucket)}&key=${this.enc(key)}`;
-      console.log(`🔗 Webhook URL: ${webhook}`);
 
       const body = {
         input: {
@@ -94,11 +77,6 @@ export class ConsumerService implements OnModuleInit {
       };
 
       console.log('📤 Submitting to RunPod API...');
-      console.log(`   - Endpoint: ${this.endpoint}`);
-      console.log(`   - Model: ${this.model}`);
-      console.log(`   - Word Timestamps: true`);
-      console.log(`   - VAD Filter: true`);
-      console.log(`   - Audio URL: ${audioUrl.substring(0, 100)}...`);
 
       const res = await fetch(this.endpoint, {
         method: 'POST',
@@ -122,7 +100,6 @@ export class ConsumerService implements OnModuleInit {
 
       console.log(`✅ RunPod job submitted successfully`);
       console.log(`   - Job ID: ${jobId || 'NOT PROVIDED'}`);
-      console.log(`   - Response:`, j);
 
       // set QUEUED_REMOTE
       console.log('💾 Updating chunk status to QUEUED_REMOTE...');

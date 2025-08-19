@@ -62,9 +62,7 @@ export class CallbackController {
       }
 
       if (status === 'SUCCEEDED' || status === 'COMPLETED') {
-        console.log(body);
         console.log(`🎉 Handling success for session ${sessionId}, seq ${seq}`);
-        console.log(`   - Output:`, body.output || body);
 
         await this.state.handleSuccess(
           sessionId,
