@@ -1,5 +1,4 @@
 export type SessionStatus =
-  | 'RECORDING'
   | 'TRANSCRIBING'
   | 'FINALIZING'
   | 'COMPLETE'
