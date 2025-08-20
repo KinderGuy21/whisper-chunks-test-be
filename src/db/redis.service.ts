@@ -63,6 +63,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       appointmentId: data.appointmentId ? Number(data.appointmentId) : null,
       rollingTokenCount: Number(data.rollingTokenCount) || 0,
       nextSegmentIndex: Number(data.nextSegmentIndex) || 0,
+      nextExpectedSeq: Number(data.nextExpectedSeq) || 0,
       endRequested: data.endRequested === 'true',
       rollingText: data.rollingText || '',
       createdAt: new Date(data.createdAt),

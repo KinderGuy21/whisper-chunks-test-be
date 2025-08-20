@@ -1,4 +1,5 @@
 export type SessionStatus =
+  | 'RECORDING'
   | 'TRANSCRIBING'
   | 'FINALIZING'
   | 'COMPLETE'
@@ -16,6 +17,7 @@ export interface Session {
   // rolling state for dedupe and segmentation
   rollingTokenCount: number;
   nextSegmentIndex: number;
+  nextExpectedSeq: number;
   endRequested: boolean;
   rollingText: string;
   createdAt: Date;

@@ -172,9 +172,9 @@ export class StateService {
       });
       console.log('✅ Chunk status updated to SUCCEEDED');
 
-      // merge and maybe summarize
-      console.log('🔄 Merging transcript and checking for summarization...');
-      await this.mergeAndMaybeSummarize(sessionId, output);
+      // Attempt in-order assembly based on nextExpectedSeq
+      console.log('🔄 Attempting in-order assembly...');
+      await this.tryAssembleInOrder(sessionId);
 
       const totalTime = Date.now() - startTime;
       console.log(`🎉 Success handling completed in ${totalTime}ms`);
@@ -185,80 +185,67 @@ export class StateService {
     }
   }
 
-  private async mergeAndMaybeSummarize(sessionId: string, output: FWOutput) {
-    // 1) Precompute merge outside the transaction
-    const words = this.flattenWords(output);
-    const text = this.cleanJoin(words);
+  private async tryAssembleInOrder(sessionId: string) {
+    // Loop assembling strictly by nextExpectedSeq
+    while (true) {
+      const session = await this.redis.getSession(sessionId);
+      if (!session) throw new Error(`Session ${sessionId} not found`);
+      const nextSeq = session.nextExpectedSeq ?? 0;
 
-    // 2) Get or create session
-    let session = await this.redis.getSession(sessionId);
-    if (!session) {
-      await this.redis.createSession({
+      const chunk = await this.redis.getChunk(sessionId, nextSeq);
+      if (!chunk || chunk.status !== 'SUCCEEDED' || !chunk.transcriptS3Key) {
+        // Next chunk not ready yet
+        break;
+      }
+
+      // Read transcript JSON from S3
+      const raw = await this.s3.getObjectText(chunk.transcriptS3Key);
+      const output = JSON.parse(raw) as FWOutput;
+      const words = this.flattenWords(output);
+      const text = this.cleanJoin(words);
+
+      const tokens = this.estimateTokens(text);
+      const combinedText = session.rollingText
+        ? `${session.rollingText} ${text}`
+        : text;
+      const newTokenCount = (session.rollingTokenCount || 0) + tokens;
+
+      const threshold = this.tokenThreshold;
+      const shouldSummarize =
+        combinedText.trim().length > 0 && newTokenCount >= threshold;
+
+      if (!shouldSummarize) {
+        await this.redis.updateSession(sessionId, {
+          rollingText: combinedText,
+          rollingTokenCount: newTokenCount,
+          nextExpectedSeq: nextSeq + 1,
+        });
+        // continue loop to see if next seq is already ready
+        continue;
+      }
+
+      // Cut a segment
+      const idx = session.nextSegmentIndex || 0;
+      const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
+      await this.redis.createSegment({
         sessionId,
-        status: 'TRANSCRIBING',
-        therapistId: null,
-        patientId: null,
-        organizationId: null,
-        appointmentId: null,
-        rollingTokenCount: 0,
-        nextSegmentIndex: 0,
-        endRequested: false,
-        rollingText: '',
+        segmentIndex: idx,
+        status: 'PENDING',
+        tokenCount: newTokenCount,
       });
-      session = await this.redis.getSession(sessionId);
-    }
-
-    if (!session) {
-      throw new Error(`Session ${sessionId} not found`);
-    }
-
-    const tokens = this.estimateTokens(text);
-    const combinedText = session.rollingText
-      ? `${session.rollingText} ${text}`
-      : text;
-    const newTokenCount = session.rollingTokenCount + tokens;
-
-    // Decide whether to cut a segment
-    const threshold = this.tokenThreshold;
-    const shouldSummarize =
-      combinedText.trim().length > 0 && newTokenCount >= threshold;
-    console.log('📝 Should summarize?', shouldSummarize);
-    console.log('TOTAL STORED TEXT:', combinedText);
-    console.log('previous REDIS session:', session);
-    if (!shouldSummarize) {
-      console.log('📝 Not summarizing..., not enough text');
       await this.redis.updateSession(sessionId, {
-        rollingText: combinedText,
-        rollingTokenCount: newTokenCount,
+        nextSegmentIndex: idx + 1,
+        rollingTokenCount: 0,
+        rollingText: '',
+        nextExpectedSeq: nextSeq + 1,
       });
-      return;
+      await this.s3.putObject(
+        segInputKey,
+        Buffer.from(combinedText.trim()),
+        'text/plain',
+      );
+      await this.summarizer.invokeChunkSummarizer(sessionId, idx, segInputKey);
+      // Continue loop in case subsequent seq are ready
     }
-    console.log('📝 Summarizing!...');
-    // We will close the rolling buffer into a segment
-    const idx = session.nextSegmentIndex;
-    const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
-
-    // Insert a new segment row (PENDING); summary key will be filled later by the summarizer
-    await this.redis.createSegment({
-      sessionId,
-      segmentIndex: idx,
-      status: 'PENDING',
-      tokenCount: newTokenCount,
-    });
-
-    // Reset rolling state and advance segment index
-    await this.redis.updateSession(sessionId, {
-      nextSegmentIndex: idx + 1,
-      rollingTokenCount: 0,
-      rollingText: '',
-    });
-
-    // 3) Post-commit I/O (no DB locks held)
-    await this.s3.putObject(
-      segInputKey,
-      Buffer.from(combinedText.trim()),
-      'text/plain',
-    );
-    await this.summarizer.invokeChunkSummarizer(sessionId, idx, segInputKey);
   }
 }

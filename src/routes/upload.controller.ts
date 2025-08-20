@@ -73,6 +73,7 @@ export class UploadController {
         appointmentId,
         rollingTokenCount: 0,
         nextSegmentIndex: 0,
+        nextExpectedSeq: 0,
         endRequested: false,
         rollingText: '',
       });
