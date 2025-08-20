@@ -66,6 +66,9 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       nextExpectedSeq: Number(data.nextExpectedSeq) || 0,
       endRequested: data.endRequested === 'true',
       rollingText: data.rollingText || '',
+      lastMergedEndMs: data.lastMergedEndMs
+        ? Number(data.lastMergedEndMs)
+        : null,
       createdAt: new Date(data.createdAt),
       updatedAt: new Date(data.updatedAt),
     };

@@ -20,6 +20,7 @@ export interface Session {
   nextExpectedSeq: number;
   endRequested: boolean;
   rollingText: string;
+  lastMergedEndMs?: number | null;
   createdAt: Date;
   updatedAt: Date;
 }

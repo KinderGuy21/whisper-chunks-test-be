@@ -204,6 +204,21 @@ export class StateService {
       const words = this.flattenWords(output);
       const text = this.cleanJoin(words);
 
+      // Continuity check (basic): ensure non-decreasing timeline
+      const lastEnd = session.lastMergedEndMs ?? 0;
+      const toleranceMs = 200; // allow small overlaps
+      if (typeof chunk.startMs === 'number') {
+        if (chunk.startMs + toleranceMs < lastEnd) {
+          console.warn(
+            `⚠️ Overlap detected: chunk seq=${nextSeq} starts at ${chunk.startMs} < lastEnd=${lastEnd}`,
+          );
+        } else if (chunk.startMs > lastEnd + toleranceMs) {
+          console.warn(
+            `⚠️ Gap detected: chunk seq=${nextSeq} starts at ${chunk.startMs} > lastEnd=${lastEnd}`,
+          );
+        }
+      }
+
       const tokens = this.estimateTokens(text);
       const combinedText = session.rollingText
         ? `${session.rollingText} ${text}`
@@ -219,6 +234,8 @@ export class StateService {
           rollingText: combinedText,
           rollingTokenCount: newTokenCount,
           nextExpectedSeq: nextSeq + 1,
+          lastMergedEndMs:
+            typeof chunk.endMs === 'number' ? chunk.endMs : lastEnd,
         });
         // continue loop to see if next seq is already ready
         continue;
@@ -238,6 +255,8 @@ export class StateService {
         rollingTokenCount: 0,
         rollingText: '',
         nextExpectedSeq: nextSeq + 1,
+        lastMergedEndMs:
+          typeof chunk.endMs === 'number' ? chunk.endMs : lastEnd,
       });
       await this.s3.putObject(
         segInputKey,
