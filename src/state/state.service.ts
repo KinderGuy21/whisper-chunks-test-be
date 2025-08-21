@@ -233,7 +233,6 @@ export class StateService {
     console.log('📝 Summarizing!...');
     // We will close the rolling buffer into a segment
     const idx = session.nextSegmentIndex;
-    const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
 
     // Insert a new segment row (PENDING); summary key will be filled later by the summarizer
     await this.redis.createSegment({
@@ -250,12 +249,10 @@ export class StateService {
       rollingText: '',
     });
 
-    // 3) Post-commit I/O (no DB locks held)
-    await this.s3.putObject(
-      segInputKey,
-      Buffer.from(combinedText.trim()),
-      'text/plain',
+    await this.summarizer.invokeChunkSummarizer(
+      sessionId,
+      idx,
+      combinedText.trim(),
     );
-    await this.summarizer.invokeChunkSummarizer(sessionId, idx, segInputKey);
   }
 }
