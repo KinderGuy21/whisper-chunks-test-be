@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { Session, SessionStatus } from './session.entity';
 import { Chunk, ChunkStatus } from './chunk.entity';
-import { Segment } from './segment.entity';
+import { Segment, SegmentStatus } from './segment.entity';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -63,7 +63,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       appointmentId: data.appointmentId ? Number(data.appointmentId) : null,
       rollingTokenCount: Number(data.rollingTokenCount) || 0,
       nextSegmentIndex: Number(data.nextSegmentIndex) || 0,
-      endRequested: data.endRequested === 'true',
       rollingText: data.rollingText || '',
       createdAt: new Date(data.createdAt),
       updatedAt: new Date(data.updatedAt),
@@ -109,7 +108,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       startMs: Number(data.startMs),
       endMs: Number(data.endMs),
       status: data.status as ChunkStatus,
-      runpodJobId: data.runpodJobId || null,
+      predictionId: data.predictionId || null,
       attempt: Number(data.attempt) || 0,
       errorCode: data.errorCode || null,
       errorMessage: data.errorMessage || null,
@@ -147,7 +146,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
           startMs: Number(data.startMs),
           endMs: Number(data.endMs),
           status: data.status as ChunkStatus,
-          runpodJobId: data.runpodJobId || null,
+          predictionId: data.predictionId || null,
           attempt: Number(data.attempt) || 0,
           errorCode: data.errorCode || null,
           errorMessage: data.errorMessage || null,
@@ -193,7 +192,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return {
       sessionId: data.sessionId,
       segmentIndex: Number(data.segmentIndex),
-      status: data.status,
+      status: data.status as SegmentStatus,
       startMs: data.startMs ? Number(data.startMs) : null,
       endMs: data.endMs ? Number(data.endMs) : null,
       tokenCount: data.tokenCount ? Number(data.tokenCount) : null,
@@ -226,7 +225,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         segments.push({
           sessionId: data.sessionId,
           segmentIndex: Number(data.segmentIndex),
-          status: data.status,
+          status: data.status as SegmentStatus,
           startMs: data.startMs ? Number(data.startMs) : null,
           endMs: data.endMs ? Number(data.endMs) : null,
           tokenCount: data.tokenCount ? Number(data.tokenCount) : null,

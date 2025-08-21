@@ -2,7 +2,6 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { RabbitService } from './rabbit.service';
 import { S3Service } from '../s3/s3.service';
 import { ConfigService } from '@nestjs/config';
-import { Chunk } from '../db/chunk.entity';
 import { RedisService } from '../db/redis.service';
 
 @Injectable()
@@ -105,7 +104,7 @@ export class ConsumerService implements OnModuleInit {
       console.log('💾 Updating chunk status to QUEUED_REMOTE...');
       await this.redis.updateChunk(sessionId, seq, {
         status: 'QUEUED_REMOTE',
-        runpodJobId: jobId || null,
+        predictionId: jobId || null,
       });
       console.log('✅ Chunk status updated successfully');
 

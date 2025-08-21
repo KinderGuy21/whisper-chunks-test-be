@@ -24,7 +24,6 @@ export class FinalizeController {
   ) {
     // set metadata if provided late
     const patch: Partial<Session> = {
-      endRequested: true,
       status: 'FINALIZING',
     };
     if (therapistIdStr) patch.therapistId = Number(therapistIdStr);
@@ -38,18 +37,16 @@ export class FinalizeController {
     console.log('FINALIZED SESSION', s);
     if (s && s.rollingText.trim()) {
       const idx = s.nextSegmentIndex;
-      const segInputKey = `sessions/${sessionId}/segments/segment-${idx}-input.txt`;
-      await this.s3.putObject(
-        segInputKey,
-        Buffer.from(s.rollingText.trim()),
-        'text/plain',
-      );
       await this.redis.createSegment({
         sessionId,
         segmentIndex: idx,
         status: 'PENDING',
       });
-      await this.summarizer.invokeChunkSummarizer(sessionId, idx, segInputKey);
+      await this.summarizer.invokeChunkSummarizer(
+        sessionId,
+        idx,
+        s.rollingText.trim(),
+      );
       await this.redis.updateSession(sessionId, {
         nextSegmentIndex: idx + 1,
         rollingText: '',

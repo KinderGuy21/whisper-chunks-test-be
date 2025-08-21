@@ -73,7 +73,6 @@ export class UploadController {
         appointmentId,
         rollingTokenCount: 0,
         nextSegmentIndex: 0,
-        endRequested: false,
         rollingText: '',
       });
     } else if (therapistId || patientId || organizationId || appointmentId) {

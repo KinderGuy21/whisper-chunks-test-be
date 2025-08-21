@@ -93,13 +93,12 @@ export class SummarizerService {
   async invokeChunkSummarizer(
     sessionId: string,
     segmentIndex: number,
-    segInputKey: string,
+    text: string,
   ) {
     await this.redis.updateSegment(sessionId, segmentIndex, {
       status: 'SUMMARIZING',
     });
 
-    const text = await this.s3.getObjectText(segInputKey);
     console.log('object text:', text);
     const s = await this.redis.getSession(sessionId);
 

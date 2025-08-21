@@ -1,7 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Session } from '../db/session.entity';
 import { Chunk } from '../db/chunk.entity';
-import { Segment } from '../db/segment.entity';
 import { S3Service } from '../s3/s3.service';
 import { ConfigService } from '@nestjs/config';
 import { SummarizerService } from '../summary/summarizer.service';
@@ -202,7 +200,6 @@ export class StateService {
         appointmentId: null,
         rollingTokenCount: 0,
         nextSegmentIndex: 0,
-        endRequested: false,
         rollingText: '',
       });
       session = await this.redis.getSession(sessionId);

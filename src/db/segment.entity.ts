@@ -1,7 +1,9 @@
+export type SegmentStatus = 'PENDING' | 'SUMMARIZING' | 'SUCCEEDED' | 'FAILED';
+
 export interface Segment {
   sessionId: string;
   segmentIndex: number;
-  status: string; // PENDING, SUMMARIZING, SUCCEEDED, FAILED
+  status: SegmentStatus;
   startMs?: number | null;
   endMs?: number | null;
   tokenCount?: number | null;

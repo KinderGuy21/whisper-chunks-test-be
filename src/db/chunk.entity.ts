@@ -16,7 +16,7 @@ export interface Chunk {
   startMs: number;
   endMs: number;
   status: ChunkStatus;
-  runpodJobId?: string | null;
+  predictionId?: string | null;
   attempt: number;
   errorCode?: string | null;
   errorMessage?: string | null;
